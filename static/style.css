@@ -1,0 +1,27 @@
+.circle {
+      width: 100px;
+      height: 100px;
+      -webkit-border-radius: 25px;
+      -moz-border-radius: 25px;
+      border-radius: 25px;
+      background: red;
+ }
+
+ #game-board{
+    margin-top:100px;
+    margin-left: auto;
+    margin-right: auto;
+    height:400px;
+    width:600px;
+    background-color:#66ffff;
+ }
+
+
+ #canvas {
+    margin-top: 100px;
+    padding-left: 0;
+    padding-right: 0;
+    margin-left: auto;
+    margin-right: auto;
+    display: block;
+}
