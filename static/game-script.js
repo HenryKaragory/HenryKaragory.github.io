@@ -1,253 +1,217 @@
-var BOARD_HEIGHT = parseFloat($('#board').css('height'));
-	var BOARD_WIDTH = parseFloat($('#board').css('width'));
-	var BOARD_LEFT = BOARD_WIDTH/8.0;
-	var SCORE = 0;
-
-	var HERO_WIDTH = 20;
-	var HERO_HEIGHT = 20;
-	var HERO_X = BOARD_LEFT+BOARD_WIDTH/2;
-	var HERO_Y = 500;
-	var HERO_SPEED = 15;
-
-	var MONSTER_WIDTH = 25;
-	var MONSTER_HEIGHT = 25;
-
-	var LASER_HEIGHT=50;
-	var LASER_WIDTH = 2;
-	var totalLaser =0;
-
-	var LEFT_KEY = 37;
-	var UP_KEY = 38;
-	var RIGHT_KEY = 39;
-	var DOWN_KEY = 40;
-	var SPACEBAR =32;
-
-	var DIFFICULTY = 10;
-	var PLAYING = 1;
-
-	var KEYMAP = {};
-	KEYMAP[LEFT_KEY]=false;
-	KEYMAP[RIGHT_KEY]=false;
-	KEYMAP[UP_KEY]=false;
-	KEYMAP[DOWN_KEY]=false;
-	KEYMAP[SPACEBAR]=false;
-
-	var monsterArray = new Array();
-	var laserArray = new Array();
-
-	var startInterval = 0;
-
-	function Character(element, height, width, x, y){
-		this.element = element;
-		this.height = height;
-		this.width = width;
-		this.x = x;
-		this.y = y;
+var
+/**
+ * Constants
+ */
+WIDTH  = 700,
+HEIGHT = 600,
+pi = Math.PI,
+UpArrow   = 87,
+DownArrow = 83,
+/**
+ * Game elements
+ */
+canvas,
+ctx,
+keystate,
+/**
+ * The player paddle
+ *
+ * @type {Object}
+ */
+player = {
+	x: null,
+	y: null,
+	width:  20,
+	height: 100,
+	/**
+	 * Update the position depending on pressed keys
+	 */
+	update: function() {
+		if (keystate[UpArrow]) this.y -= 7;
+		if (keystate[DownArrow]) this.y += 7;
+		// keep the paddle inside of the canvas
+		this.y = Math.max(Math.min(this.y, HEIGHT - this.height), 0);
+	},
+	/**
+	 * Draw the player paddle to the canvas
+	 */
+	draw: function() {
+		ctx.fillRect(this.x, this.y, this.width, this.height);
 	}
-
-	//check to see if two characters are overlapping
-	function overlapCheck(character1, character2){
-		if(!(character1 == null) && !(character2 == null)){
-			var c1top = character1.y;
-			var c1height = character1.height;
-			var c1left = character1.x;
-			var c1width = character1.width;
-
-			var c2top = character2.y;
-			var c2height = character2.height;
-			var c2left = character2.x;
-			var c2width = character2.width;
-
-			//make sure the x logic is correct
-			var xintersect = !((c1left +c1width<c2left) || (c2left + c2width < c1left));
-			var yintersect = !((c1top + c1height < c2top) || (c1top> c2top + c2height));
-
-			if(xintersect && yintersect){
-				return true;
-			}
-			return false;
-		}
+},
+/**
+ * The ai paddle
+ *
+ * @type {Object}
+ */
+ai = {
+	x: null,
+	y: null,
+	width:  20,
+	height: 100,
+	/**
+	 * Update the position depending on the ball position
+	 */
+	update: function() {
+		// calculate ideal position
+		var desty = ball.y - (this.height - ball.side)*0.5;
+		// ease the movement towards the ideal position
+		this.y += (desty - this.y) * 0.1;
+		// keep the paddle inside of the canvas
+		this.y = Math.max(Math.min(this.y, HEIGHT - this.height), 0);
+	},
+	/**
+	 * Draw the ai paddle to the canvas
+	 */
+	draw: function() {
+		ctx.fillRect(this.x, this.y, this.width, this.height);
 	}
-
-	//create a new monster
-	//lower value of DIFFICULTY corresponds to harder game
-	function createMonster(){
-		var random = Math.random()*DIFFICULTY;
-		random = parseInt(random);
-
-		if(random == 0){
-			var monsterId = 'monster' + parseInt(Math.random()*100000000);
-			var monsterHtml = '<div class = "monster" id = "' + monsterId + '"></div>';
-			var xStart = BOARD_LEFT + parseInt(Math.random()*BOARD_WIDTH);
-			var monster = new Character(monsterId,MONSTER_WIDTH,MONSTER_HEIGHT,xStart,0);
-
-			$('#board').append(monsterHtml);
-			updatePosition(monster);
-			monsterArray[monsterArray.length] = monster;
+},
+/**
+ * The ball object
+ *
+ * @type {Object}
+ */
+ball = {
+	x:   null,
+	y:   null,
+	vel: null,
+	side:  20,
+	speed: 12,
+	/**
+	 * Serves the ball towards the specified side
+	 *
+	 * @param  {number} side 1 right
+	 *                       -1 left
+	 */
+	serve: function(side) {
+		// set the x and y position
+		var r = Math.random();
+		this.x = side===1 ? player.x+player.width : ai.x - this.side;
+		this.y = (HEIGHT - this.side)*r;
+		// calculate out-angle, higher/lower on the y-axis =>
+		// steeper angle
+		var phi = 0.1*pi*(1 - 2*r);
+		// set velocity direction and magnitude
+		this.vel = {
+			x: side*this.speed*Math.cos(phi),
+			y: this.speed*Math.sin(phi)
 		}
+	},
+	/**
+	 * Update the ball position and keep it within the canvas
+	 */
+	update: function() {
+		// update position with current velocity
+		this.x += this.vel.x;
+		this.y += this.vel.y;
+		// check if out of the canvas in the y direction
+		if (0 > this.y || this.y+this.side > HEIGHT) {
+			// calculate and add the right offset, i.e. how far
+			// inside of the canvas the ball is
+			var offset = this.vel.y < 0 ? 0 - this.y : HEIGHT - (this.y+this.side);
+			this.y += 2*offset;
+			// mirror the y velocity
+			this.vel.y *= -1;
+		}
+		// helper function to check intesectiont between two
+		// axis aligned bounding boxex (AABB)
+		var AABBIntersect = function(ax, ay, aw, ah, bx, by, bw, bh) {
+			return ax < bx+bw && ay < by+bh && bx < ax+aw && by < ay+ah;
+		};
+		// check againts target paddle to check collision in x
+		// direction
+		var pdle = this.vel.x < 0 ? player : ai;
+		if (AABBIntersect(pdle.x, pdle.y, pdle.width, pdle.height,
+				this.x, this.y, this.side, this.side)
+		) {
+			// set the x position and calculate reflection angle
+			this.x = pdle===player ? player.x+player.width : ai.x - this.side;
+			var n = (this.y+this.side - pdle.y)/(pdle.height+this.side);
+			var phi = 0.25*pi*(2*n - 1); // pi/4 = 45
+			// calculate smash value and update velocity
+			var smash = Math.abs(phi) > 0.2*pi ? 1.5 : 1;
+			this.vel.x = smash*(pdle===player ? 1 : -1)*this.speed*Math.cos(phi);
+			this.vel.y = smash*this.speed*Math.sin(phi);
+		}
+		// reset the ball when ball outside of the canvas in the
+		// x direction
+		if (0 > this.x+this.side || this.x > WIDTH) {
+			this.serve(pdle===player ? 1 : -1);
+		}
+	},
+	/**
+	 * Draw the ball to the canvas
+	 */
+	draw: function() {
+		ctx.fillRect(this.x, this.y, this.side, this.side);
 	}
-
-	//advance each of the monsters
-	function monsterAdvance(){
-		for(var i =0;i<monsterArray.length;i++){
-			var monster = monsterArray[i];
-			monster.x += parseInt(20*Math.random()-10);
-			monster.y += 5 + parseInt(10*Math.random());
-			if(monster.y >BOARD_HEIGHT){
-				$('#'+monster.element).remove();
-				monsterArray.splice(i,1);
-			}
-			if(monster.x >BOARD_LEFT + BOARD_WIDTH){
-				$('#'+monster.element).remove();
-				monsterArray.splice(i,1);
-			}
-			updatePosition(monster);
-		}
-	}
-
-	//apply the x and y coordinates fo an object to css property
-	function updatePosition(Character){
-		var characterId = '#' + Character.element;
-		$(characterId).css('top',Character.y);
-		$(characterId).css('left',Character.x);
-	}
-
-	function laserfire(){
-		if(totalLaser<3){
-			totalLaser+=1;
-			console.log(totalLaser);
-
-			var laserId = 'laser' + laserArray.length;
-			var laserHtml = '<div class = "laser" id = "' + laserId + '"></div>';
-			var laser = new Character(laserId,LASER_WIDTH,LASER_HEIGHT,hero.x+9,hero.y - LASER_HEIGHT);
-
-			$('body').append(laserHtml);
-			updatePosition(laser);
-			laserArray[laserArray.length] = laser
-		}
-	}
-
-	function updateLaser(){
-		for(var i = 0;i<laserArray.length;i++){
-			var laser = laserArray[i];
-			laser.y-=12;
-			if(laser.y <-LASER_HEIGHT){
-				laserArray.splice(i,1);
-				console.log('#' + laser.element);
-				$('#' + laser.element).remove();
-				totalLaser-=1;
-			}
-			updatePosition(laser);
-		}
-	}
-
-	//update the position of each character on the screen
-	//make sure the characters are all on the screen
-	//check to make sure that monster and hero and laser and monster overlaps are taken care of
-	function showCharacters(){
-		updatePosition(hero);
-		checkBounds(hero);
-		updateLaser();
-		monsterAdvance();
-
-		for(var i = 0; i<monsterArray.length;i++){
-			var monster = monsterArray[i];
-
-			for(var j = 0; j<laserArray.length;j++){
-				var laser = laserArray[j];
-
-				if(overlapCheck(laser, monster)){
-					monsterArray.toString();
-					laserArray.toString();
-					$('#' + monster.element).remove();
-					$('#' + laser.element).remove();
-					monsterArray.splice(i,1);
-					laserArray.splice(j,1);
-
-					totalLaser-=1;
-					SCORE+=1;
-					$('#score').html(SCORE.toString());
-				}
-			}
-			if(overlapCheck(monster,hero)){
-				PLAYING = 0;
-			}
-		}
-	}
-
-	//make sure your characters are inside of the bounds
-	function checkBounds(character){
-		if(character.x<BOARD_LEFT){
-			character.x = BOARD_LEFT;
-		}
-		else if(character.y<30){
-			character.y = 30;
-		}
-		else if(character.x + character.width > BOARD_LEFT+BOARD_WIDTH){
-			character.x = BOARD_LEFT + BOARD_WIDTH-character.width;
-		}
-		else if(character.y+character.height>BOARD_HEIGHT){
-		character.y = BOARD_HEIGHT- character.height;
-		}
-	}
-
-
-	var hero = new Character('hero',HERO_WIDTH,HERO_HEIGHT,HERO_X,HERO_Y);
-
-	$(document).keydown(function(event){
-		var key = event.which;
-		if(key in KEYMAP){
-			KEYMAP[key] = true;
-			if(KEYMAP[LEFT_KEY]){
-				hero.x-=HERO_SPEED;
-			}if(KEYMAP[RIGHT_KEY]){
-				hero.x+=HERO_SPEED;
-			}if(KEYMAP[UP_KEY]){
-				hero.y-=HERO_SPEED;
-			}if(KEYMAP[DOWN_KEY]){
-				hero.y+=HERO_SPEED;
-			}if(KEYMAP[SPACEBAR]){
-			laserfire();
-			}
-		}
+};
+/**
+ * Starts the game
+ */
+function main() {
+	// create, initiate and append game canvas
+	canvas = document.createElement("canvas");
+	canvas.width = WIDTH;
+	canvas.height = HEIGHT;
+	ctx = canvas.getContext("2d");
+	document.getElementById("game-container").appendChild(canvas);
+	keystate = {};
+	// keep track of keyboard presses
+	document.addEventListener("keydown", function(evt) {
+		keystate[evt.keyCode] = true;
 	});
-
-	function cleanBoard(){
-		console.log('cleaning');
-		PLAYING = 1;
-
-		$('#board').empty();
-		$('#board').append('<div id = "hero"></div>');
-		$("#gameover").css("display","none");
-		$('#board').unbind('click');
-
-		monsterArray.splice(0,monsterArray.length);
-		showCharacters();
-		mainloop();
-	}
-
-	$(document).keyup(function(event){
-		if(event.which in KEYMAP){
-			KEYMAP[event.which] = false;
-		}
+	document.addEventListener("keyup", function(evt) {
+		delete keystate[evt.keyCode];
 	});
-
-	function mainloop(){
-		if(PLAYING){
-			if(new Date().getTime() - startInterval > 30){
-				showCharacters();
-				createMonster();
-				startInterval = new Date().getTime();
-			}
-			setTimeout('mainloop();',2);
-		}
-		else{
-			$("#gameover").css("display","initial");
-			$('#board').click(function(){
-			cleanBoard();
-			});
-		}
+	init(); // initiate game objects
+	// game loop function
+	var loop = function() {
+		update();
+		draw();
+		window.requestAnimationFrame(loop, canvas);
+	};
+	window.requestAnimationFrame(loop, canvas);
+}
+/**
+ * Initatite game objects and set start positions
+ */
+function init() {
+	player.x = player.width;
+	player.y = (HEIGHT - player.height)/2;
+	ai.x = WIDTH - (player.width + ai.width);
+	ai.y = (HEIGHT - ai.height)/2;
+	ball.serve(1);
+}
+/**
+ * Update all game objects
+ */
+function update() {
+	ball.update();
+	player.update();
+	ai.update();
+}
+/**
+ * Clear canvas and draw all game objects and net
+ */
+function draw() {
+	ctx.fillRect(0, 0, WIDTH, HEIGHT);
+	ctx.save();
+	ctx.fillStyle = "#fff";
+	ball.draw();
+	player.draw();
+	ai.draw();
+	// draw the net
+	var w = 4;
+	var x = (WIDTH - w)*0.5;
+	var y = 0;
+	var step = HEIGHT/20; // how many net segments
+	while (y < HEIGHT) {
+		ctx.fillRect(x, y+step*0.25, w, step*0.5);
+		y += step;
 	}
-
-
-		mainloop();
+	ctx.restore();
+}
+// start and run the game
+main();
